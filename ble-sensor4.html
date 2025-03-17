@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ESP32 Distance Sensor</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+        }
+        button {
+            font-size: 18px;
+            padding: 10px;
+            margin: 10px;
+        }
+    </style>
+</head>
+<body>
+    <h1>ESP32 距離測定センサー</h1>
+    <button onclick="connectBLE()">接続</button>
+    <button onclick="sendCommand('START')">開始</button>
+    <button onclick="sendCommand('STOP')">停止</button>
+    <button onclick="sendCommand('RESET')">リセット</button>
+    <button onclick="copyData()">データをコピー</button>
+    <h2>測定距離: <span id="distance">--</span> cm</h2>
+    <canvas id="graph" width="400" height="200"></canvas>
+
+    <script>
+        let bleDevice;
+        let bleServer;
+        let commandCharacteristic;
+        let dataCharacteristic;
+        let distanceData = [];
+        let labels = [];
+        let chart;
+
+        const SERVICE_UUID = "12345678-1234-1234-1234-123456789abc";
+        const CHARACTERISTIC_UUID = "abcd1234-5678-1234-5678-abcdefabcdef";
+        const COMMAND_CHARACTERISTIC_UUID = "1234abcd-5678-1234-5678-abcdefabcdef";
+
+        async function connectBLE() {
+            try {
+                bleDevice = await navigator.bluetooth.requestDevice({
+                    acceptAllDevices: true,
+                    optionalServices: [SERVICE_UUID]
+                });
+                
+                bleServer = await bleDevice.gatt.connect();
+                const service = await bleServer.getPrimaryService(SERVICE_UUID);
+                
+                commandCharacteristic = await service.getCharacteristic(COMMAND_CHARACTERISTIC_UUID);
+                dataCharacteristic = await service.getCharacteristic(CHARACTERISTIC_UUID);
+                
+                await dataCharacteristic.startNotifications();
+                dataCharacteristic.addEventListener('characteristicvaluechanged', handleData);
+                
+                alert("BLE接続成功！");
+            } catch (error) {
+                console.error(error);
+                alert("BLE接続に失敗しました");
+            }
+        }
+
+        function sendCommand(command) {
+            if (commandCharacteristic) {
+                const encoder = new TextEncoder();
+                commandCharacteristic.writeValue(encoder.encode(command));
+                console.log("Sent command:", command);
+
+                if (command === "RESET") {
+                    distanceData = [];
+                    labels = [];
+                    chart.data.labels = labels;
+                    chart.data.datasets[0].data = distanceData;
+                    chart.update();
+                    document.getElementById("distance").textContent = "--";
+                    console.log("Graph reset.");
+                }
+            } else {
+                alert("BLEに接続してください");
+            }
+        }
+
+        function handleData(event) {
+            const value = new TextDecoder().decode(event.target.value);
+            document.getElementById("distance").textContent = value;
+            console.log("Received distance:", value);
+
+            let distance = parseFloat(value);
+            if (!isNaN(distance)) {
+                if (distanceData.length > 60) {
+                    distanceData.shift();
+                    labels.shift();
+                }
+                distanceData.push(distance);
+                labels.push(new Date().toLocaleTimeString().split(" ")[0]);
+                chart.data.labels = labels;
+                chart.data.datasets[0].data = distanceData;
+                chart.update();
+            }
+        }
+
+        function copyData() {
+            let text = distanceData.join(", ");
+            navigator.clipboard.writeText(text).then(() => {
+                alert("データをコピーしました！");
+            }).catch(err => {
+                console.error("コピーエラー", err);
+            });
+        }
+
+        window.onload = function() {
+            let ctx = document.getElementById('graph').getContext('2d');
+            chart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: '距離 (cm)',
+                        data: distanceData,
+                        borderColor: 'blue',
+                        borderWidth: 2,
+                        fill: false
+                    }]
+                }
+            });
+        };
+    </script>
+</body>
+</html>
